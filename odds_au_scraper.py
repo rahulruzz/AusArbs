@@ -1,5 +1,4 @@
 
-
 #------------------------------------------------------------------
 
 import numpy as np
@@ -47,67 +46,77 @@ class CWebCrawler(object):
         self.all_results = []
         self.m_homepage = CWebsite( ODDSCHECKER_HOME , ODDSCHECKER_HOME, name="oddschecker_home" )
 
-    # ------------------------------------------------------------------
-    # public methods
-    # ------------------------------------------------------------------
-
     def run(self):
+        # Grab all sports
         sport_specific_home_tags = self.m_homepage.getClasses(["sport-menu__link"])
         for sport_tag in sport_specific_home_tags:
-            if sport_tag.hasAttr(DEFAULT_LINK_ATTR_NAME):
-                message.logDebug("Examining " + sport_tag.getName() + " arbitrage opportunities.")
-                try:
-                    # Scrape the current sport's webpage
-                    full_sport_link = ODDSCHECKER_HOME + sport_tag.getAttr(DEFAULT_LINK_ATTR_NAME)
-                    sport_home_webpage = CWebsite(full_sport_link, ODDSCHECKER_HOME, name=sport_tag.getName())
-                except:
-                    message.logWarning("Unable to load webpage, skipping to next sport")
-                    continue
 
-                # Grab all leagues for current sport
-                league_tags = sport_home_webpage.getClasses(["league-component"])
-                for league_tag in league_tags:
-                    if league_tag.hasAttr(DEFAULT_LINK_ATTR_NAME):
-                        league_name = league_tag.getName()
-                        message.logDebug("Examining league" + league_name)
-                        try:
-                            # Scrape a league for current sport
-                            league_link = ODDSCHECKER_HOME + league_tag.getAttr(DEFAULT_LINK_ATTR_NAME).strip("/")
-                            league_webpage = CWebsite(league_link, ODDSCHECKER_HOME, name=league_name)
-                        except:
-                            message.logWarning("Unable to load league, skipping to next league")
-                            continue
+            if not sport_tag.hasAttr(DEFAULT_LINK_ATTR_NAME):
+                continue
 
-                        if INCLUDE_INPLAY == False:
-                            if len(league_webpage.getClasses("no-arrow in-play")) > 0:
-                                message.logDebug("Game is in play, skipping.")
-                                continue
-                        try:
-                            game_tags = league_webpage.getClasses("market-dd select-wrap")[0].getClasses(
-                                "select-item beta-callout")
-                        except:
-                            message.logWarning("Unable to load market tags, skipping to next match")
-                            continue
+            message.logDebug("Examining " + sport_tag.getName() + " arbitrage opportunities.")
 
-                        market_tags = [m for m in market_tags if m.getName() not in DISALLOWED_MARKETS]
-                        market_tags.reverse()
-                        for market_tag in market_tags:
+            # Current sport has a weblink link. Try open the sport's webpage
+            try:
+                # Scrape the current sport's webpage
+                full_sport_link = ODDSCHECKER_HOME + sport_tag.getAttr(DEFAULT_LINK_ATTR_NAME)
+                sport_website = CWebsite(full_sport_link, ODDSCHECKER_HOME, name=sport_tag.getName())
+                # Check all the leagues for current sport
+                check_leagues_for_sport(sport_website)
+            except:
+                message.logWarning("Unable to load webpage, skipping to next sport")
+                continue
+        return
 
-                            message.logDebug("Considering market: " + market_tag.getName() + ".")
+   def check_leagues_for_sport(sport_website):
+       # Grab all leagues for current sport
+       league_tags = sport_website.getClasses(["league-component"])
+       for league_tag in league_tags:
 
-                            try:
-                                market_webpage = CWebsite(
-                                    sport_home_webpage.getHomeURL() + market_tag.getAttr(DEFAULT_LINK_ATTR_NAME),
-                                    ODDSCHECKER_HOME, name=game_name + ": " + market_tag.getName())
-                            except:
-                                message.logWarning("Unable to load webpage, skipping to next market")
-                                continue
+           if not league_tag.hasAttr(DEFAULT_LINK_ATTR_NAME):
+               continue
 
-                            self._check_website(market_webpage)
+           league_name = league_tag.getName()
+           message.logDebug("Examining league" + league_name)
 
-    # ------------------------------------------------------------------
-    # public methods
-    # ------------------------------------------------------------------
+           # Current league has a webpage. Try open the league's webpage
+           try:
+               league_link = ODDSCHECKER_HOME + league_tag.getAttr(DEFAULT_LINK_ATTR_NAME).strip("/")
+               league_website = CWebsite(league_link, ODDSCHECKER_HOME, name=league_name)
+               # Check all the games for current league
+               check_games_for_league(league_website)
+           except:
+               message.logWarning("Unable to load league, skipping to next league")
+               continue
+
+   def check_games_for_league(league_website):
+        if not INCLUDE_INPLAY:
+           # Disregard any games that are in play
+           if len(league_website.getClasses("no-arrow in-play")) > 0:
+               message.logDebug("Game is in play, skipping.")
+               return
+
+        try:
+           game_tags = league_website.getClasses("meeting head-to-head draw")
+        except:
+           message.logWarning("Unable to load market tags, skipping to next match")
+           continue
+
+        market_tags = [m for m in market_tags if m.getName() not in DISALLOWED_MARKETS]
+        market_tags.reverse()
+        for market_tag in market_tags:
+
+           message.logDebug("Considering market: " + market_tag.getName() + ".")
+
+           try:
+               market_webpage = CWebsite(
+                   sport_home_webpage.getHomeURL() + market_tag.getAttr(DEFAULT_LINK_ATTR_NAME),
+                   ODDSCHECKER_HOME, name=game_name + ": " + market_tag.getName())
+           except:
+               message.logWarning("Unable to load webpage, skipping to next market")
+               continue
+
+           self._check_website(market_webpage)
 
     def _check_website(self, website, supress=False, verify=False):
         """
@@ -123,17 +132,15 @@ class CWebCrawler(object):
             for tchild, table_elem in enumerate(table.getChildren()):
                 if len(table_elem.getClasses("beta-sprite add-to-bet-basket")) == 1:
                     name = table_elem.getClasses("beta-sprite add-to-bet-basket")[0].getAttr("data-name")
-                    if name != None:
+                    if name is not None:
                         bet_names[tnum] = name
                 if "wo-col" in table_elem.getClassName():
                     break
-                if table_elem.hasAttr("data-odig"):
-                    if table_elem.hasAttr("data-o"):
-                        if isinstance(table_elem.getAttr("data-o"), (str, int)):
-                            if table_elem.getAttr("data-o") != "" and "np" not in table_elem.getClassName():
-                                if float(table_elem.getAttr("data-odig")) > best_odds[tnum]:
-                                    best_odds[tnum] = float(table_elem.getAttr("data-odig"))
-                                    best_odds_ind[tnum] = tchild
+                if table_elem.hasAttr("data-odig") and table_elem.hasAttr("data-o") and isinstance(table_elem.getAttr("data-o"), (str, int)) \
+                        and table_elem.getAttr("data-o") != "" and "np" not in table_elem.getClassName() \
+                        and float(table_elem.getAttr("data-odig")) > best_odds[tnum]:
+                    best_odds[tnum] = float(table_elem.getAttr("data-odig"))
+                    best_odds_ind[tnum] = tchild
 
         if len(best_odds) > 1:
             if min(best_odds) > 0:
